@@ -6,7 +6,15 @@ project(
   LANGUAGES CXX
 )
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 add_executable(myserver)
+
+# 避免输出只有 GCC 认识的代码
+set_target_properties(myserver
+  PROPERTIES
+    CXX_EXTENSIONS OFF
+)
 
 target_sources(myserver
   PRIVATE
@@ -14,7 +22,7 @@ target_sources(myserver
 )
 
 target_compile_features(myserver
-  PUBLIC
+  PRIVATE
     cxx_std_20
 )
 
@@ -23,4 +31,6 @@ target_compile_options(myserver
     -Wall
     -Wextra
     -Wpedantic
+    -Wconversion
+    -Wsign-conversion
 )
