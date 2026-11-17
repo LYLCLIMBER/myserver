@@ -12,17 +12,22 @@
 - [x] 添加许可证
 
 **完成标准**
-* 项目能够受 Cmake 和 git 管理
+- 项目能够受 Cmake 和 git 管理
 
 ### M1 命令行推理（状态：未完成）
 
 **目标**：实现用命令行加载模型进行推理
 
 **任务**
-- [ ] 待调研
+- [x] 阅读 llama.cpp/examples/simple/simple.cpp，画出流程图
+- [x] 下载 Qwen2.5-3B-Instruct 的 Q4_K_M 量化版，编译 llama.cpp 跑通一次
+- [x] 让 myserver 链接上 llama.cpp
+- [ ] 按照 simple.cpp 流程编写 main.cpp，完成推理
+- [ ] 加上命令行参数
 
 **完成标准**
-* 能够用命令行调用模型进行简单的一句话推理
+- 能够用命令行调用模型进行简单的一句话推理
+- 编译零警告
 
 - [ ] M2 代码分层
 
