@@ -6,19 +6,25 @@ project(
   LANGUAGES CXX
 )
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable(myserver)
+find_package(llama REQUIRED)
 
-# 避免输出只有 GCC 认识的代码
-set_target_properties(myserver
-  PROPERTIES
-    CXX_EXTENSIONS OFF
-)
+add_executable(myserver)
 
 target_sources(myserver
   PRIVATE
     src/main.cpp
+)
+
+target_link_libraries(myserver
+  PRIVATE
+    llama
 )
 
 target_compile_features(myserver
@@ -33,4 +39,10 @@ target_compile_options(myserver
     -Wpedantic
     -Wconversion
     -Wsign-conversion
+)
+
+# 避免输出只有 GCC 认识的代码
+set_target_properties(myserver
+  PROPERTIES
+    CXX_EXTENSIONS OFF
 )
