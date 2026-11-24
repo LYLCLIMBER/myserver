@@ -15,7 +15,8 @@
       "description": "日常开发用的 Debug 构建",
       "inherits": "base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
       }
     },
     {
@@ -26,7 +27,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "MYSERVER_ENABLE_ASAN": "ON",
-        "MYSERVER_ENABLE_UBSAN": "ON"
+        "MYSERVER_ENABLE_UBSAN": "ON",
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
       }
     },
     {

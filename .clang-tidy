@@ -1,0 +1,13 @@
+# clang-tidy 配置：只开启明确需要的检查，规则稳定后再逐步增加
+# 检查列表：https://clang.llvm.org/extra/clang-tidy/checks/list.html
+Checks: >
+  -*,
+  misc-const-correctness,
+  readability-qualified-auto
+
+# 只报告本项目源码里的问题，不报告 llama.h 等第三方头文件
+HeaderFilterRegex: '.*/myserver/src/.*'
+
+CheckOptions:
+  # 不要求指针变量本身加 const（llama_model* const model）
+  misc-const-correctness.AnalyzePointers: false
