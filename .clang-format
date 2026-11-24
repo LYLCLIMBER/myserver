@@ -1,0 +1,24 @@
+# 以 LLVM 风格为基础，只列出与它不同的地方
+# 完整选项说明：https://clang.llvm.org/docs/ClangFormatStyleOptions.html
+BasedOnStyle: LLVM
+
+# 每行最多 120 列（LLVM 默认 80，对 llama.cpp 的长函数名太窄）
+ColumnLimit: 120
+
+# 声明指针/引用时 * 和 & 贴着类型：llama_model* model
+PointerAlignment: Left
+
+# 函数体的 { 另起一行，if/for 等仍然跟在同一行
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterNamespace: true
+
+# 函数体不压成一行（空函数 {} 除外）
+AllowShortFunctionsOnASingleLine: Empty
+
+# 列表初始化 {} 前保留空格：int x {5};
+SpaceBeforeCpp11BracedList: true
+
+# #include 分组之间不自动重排顺序（避免改动意外影响编译）
+SortIncludes: Never
