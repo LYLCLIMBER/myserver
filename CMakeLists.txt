@@ -13,6 +13,9 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(MYSERVER_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(MYSERVER_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+
 find_package(llama REQUIRED)
 
 add_executable(myserver)
@@ -39,6 +42,7 @@ target_compile_options(myserver
     -Wpedantic
     -Wconversion
     -Wsign-conversion
+    -Wmissing-declarations
 )
 
 # 避免输出只有 GCC 认识的代码
@@ -46,3 +50,28 @@ set_target_properties(myserver
   PROPERTIES
     CXX_EXTENSIONS OFF
 )
+
+if(MYSERVER_ENABLE_ASAN)
+  target_compile_options(myserver
+    PRIVATE
+      -fsanitize=address
+      -fno-omit-frame-pointer
+  )
+  target_link_options(myserver
+    PRIVATE
+      -fsanitize=address
+  )
+endif()
+
+if(MYSERVER_ENABLE_UBSAN)
+  target_compile_options(myserver
+    PRIVATE
+      -fsanitize=undefined
+      -fno-omit-frame-pointer
+      -fno-sanitize-recover=all
+  )
+  target_link_options(myserver
+    PRIVATE
+      -fsanitize=undefined
+  )
+endif()
