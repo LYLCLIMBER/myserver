@@ -23,13 +23,25 @@
 - [x] 下载 Qwen2.5-3B-Instruct 的 Q4_K_M 量化版，编译 llama.cpp 跑通一次
 - [x] 让 myserver 链接上 llama.cpp
 - [ ] 按照 simple.cpp 流程编写 main.cpp，完成推理
+  - [x] s1：加载模型，然后释放
+  - [x] s2：分词
+  - [x] s3：创建 context 和 sample
+  - [ ] s4：处理 prompt，采样出一个 token
+  - [ ] s5：循环生成，直到遇到结束符或达到 n_predict
 - [ ] 加上命令行参数
 
 **完成标准**
-- 能够用命令行调用模型进行简单的一句话推理
+- s1：打印模型的一项信息然后正常退出
+- s2：打印 token id，再用 llama_token_to_piece 把它们拼回去，结果和原来的 prompt 一致
+- s3：创建成功，释放顺序正确，没有崩溃
+- s4：打印出一个合理的下一个词
+- s5：能够输出一整句话
 - 编译零警告
 
 - [ ] M2 代码分层
+
+**任务**
+- [ ] 加入 clang-tidy
 
 将推理逻辑拆分为独立的模块，做好接口设计和职责划分
 
