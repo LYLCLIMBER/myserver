@@ -6,6 +6,7 @@
 #include <vector>
 #include <string_view>
 #include <cstdint>
+#include <span>
 
 // 防止 ASAN 检查 cuda 报错
 #if defined(__SANITIZE_ADDRESS__)
@@ -28,7 +29,7 @@ void print_model_desc(const llama_model* model)
     std::cerr << __func__ << ": error: 获取模型描述失败\n";
     return;
   }
-  // desc 函数底层使用 snprintf，返回的输出字节数不包括最后终止字符串的 \0
+  // desc 函数底层使用 snprintf，返回的输出字节数不包括最后终止字符串的 \0，因此需要 =
   else if (static_cast<size_t>(length) >= sizeof(buffer)) {
     std::cerr << __func__ << ": error: 字符缓存区不足，需要" << static_cast<size_t>(length) + 1 << "字节\n";
     return;
@@ -114,6 +115,43 @@ std::optional<std::string> detokenize(const llama_vocab* vocab, const std::vecto
   }
   return res;
 }
+
+// TODO: 这里暂时只是单序列
+// 清空 batch，从 pos_0 开始连续填充 token 到 batch 中，设置位置；只设置输出最后一个 token 的 logits
+bool batch_set_tokens(llama_batch_ext* batch, std::span<const llama_token> tokens, llama_pos pos_0)
+{
+  if (batch == nullptr) {
+    std::cerr << __func__ << ": error: batch 无效\n";
+    return false;
+  }
+  llama_batch_ext_clear(batch);
+  if (tokens.empty()) {
+    std::cerr << __func__ << ": error: 填充 tokens 为空\n";
+    return false;
+  }
+  int32_t idx {};
+  for (size_t i {0}; i < tokens.size(); ++i) {
+    idx = llama_batch_ext_add_token(batch, 0, tokens[i]);
+    if (idx < 0) {
+      std::cerr << __func__ << ": error: 填充 tokens 失败，返回" << idx << "\n";
+      return false;
+    }
+    if (i > INT32_MAX) {
+      std::cerr << __func__ << ": error: token 填充溢出\n";
+      return false;
+    }
+    const llama_pos pos {pos_0 + static_cast<llama_pos>(i)};
+    if (!llama_batch_ext_set_pos(batch, idx, &pos)) {
+      std::cerr << __func__ << ": error: pos 设置失败\n";
+      return false;
+    }
+  }
+  if (!llama_batch_ext_set_output_logits(batch, idx, true)) {
+    std::cerr << __func__ << ": error: output logits 设置失败\n";
+    return false;
+  }
+  return true;
+}
 } // namespace
 
 int main()
@@ -145,6 +183,13 @@ int main()
     return 1;
   }
   print_model_desc(model);
+
+  if (llama_model_has_encoder(model)) {
+    std::cerr << __func__ << ": error: 不支持有 encoder 的模型\n";
+    llama_model_free(model);
+    llama_backend_free();
+    return 1;
+  }
 
   // 分词
   const auto* vocab {llama_model_get_vocab(model)};
@@ -195,7 +240,49 @@ int main()
   llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
 
   // 准备第一个 batch 输入
-  // 逐个 token 的输出循环
+  llama_batch_ext* batch {llama_batch_ext_init(ctx)};
+  if (!batch_set_tokens(batch, prompt_tokens, 0)) {
+    llama_batch_ext_free(batch);
+    llama_sampler_free(smpl);
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_backend_free();
+    return 1;
+  }
+
+  // 输出一个 token
+  const int32_t ret {llama_process(ctx, LLAMA_PROCESS_TYPE_DECODE, batch)};
+  if (ret != 0) {
+    std::cerr << __func__ << ": error: 推理失败，ret =" << ret << "\n";
+    llama_batch_ext_free(batch);
+    llama_sampler_free(smpl);
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_backend_free();
+    return 1;
+  }
+  const llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1);
+  if (llama_vocab_is_eog(vocab, new_token_id)) {
+    std::cerr << __func__ << "输出 token 为 eog\n";
+    llama_batch_ext_free(batch);
+    llama_sampler_free(smpl);
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_backend_free();
+    return 0;
+  }
+  auto res = token_to_piece(vocab, new_token_id);
+  if (!res) {
+    llama_batch_ext_free(batch);
+    llama_sampler_free(smpl);
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_backend_free();
+    return 1;
+  }
+  std::cout << *res << "\n";
+
+  llama_batch_ext_free(batch);
   llama_sampler_free(smpl);
   llama_free(ctx);
   llama_model_free(model);
