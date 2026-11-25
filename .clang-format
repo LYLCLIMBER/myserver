@@ -22,3 +22,6 @@ SpaceBeforeCpp11BracedList: true
 
 # #include 分组之间不自动重排顺序（避免改动意外影响编译）
 SortIncludes: Never
+
+# 现代 C++ 最主流配置：强制把所有连续空行压缩为最多 1 行
+MaxEmptyLinesToKeep: 1
