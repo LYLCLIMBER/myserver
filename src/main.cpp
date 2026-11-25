@@ -117,7 +117,7 @@ std::optional<std::string> detokenize(const llama_vocab* vocab, const std::vecto
 }
 
 // TODO: 这里暂时只是单序列
-// 清空 batch，从 pos_0 开始连续填充 token 到 batch 中，设置位置；只设置输出最后一个 token 的 logits
+// 清空 batch，从 pos_0 开始连续填充 token 到 batch 中，连续设置位置编码；只设置输出最后一个 token 的 logits
 bool batch_set_tokens(llama_batch_ext* batch, std::span<const llama_token> tokens, llama_pos pos_0)
 {
   if (batch == nullptr) {
@@ -250,41 +250,55 @@ int main()
     return 1;
   }
 
-  // 输出一个 token
-  const int32_t ret {llama_process(ctx, LLAMA_PROCESS_TYPE_DECODE, batch)};
-  if (ret != 0) {
-    std::cerr << __func__ << ": error: 推理失败，ret =" << ret << "\n";
-    llama_batch_ext_free(batch);
-    llama_sampler_free(smpl);
-    llama_free(ctx);
-    llama_model_free(model);
-    llama_backend_free();
-    return 1;
+  // 循环输出 token
+
+  int32_t n_tokens {n_prompt}; // 本次循环要处理的 token 数量，第一轮处理 prompt
+  for (int32_t n_pos = 0; n_pos + n_tokens < n_prompt + n_predict; ) {
+    const int32_t ret {llama_process(ctx, LLAMA_PROCESS_TYPE_DECODE, batch)};
+    if (ret != 0) {
+      std::cerr << __func__ << ": error: 推理失败，ret =" << ret << "\n";
+      llama_batch_ext_free(batch);
+      llama_sampler_free(smpl);
+      llama_free(ctx);
+      llama_model_free(model);
+      llama_backend_free();
+      return 1;
+    }
+    n_pos += n_tokens;
+
+    const llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1);
+    if (llama_vocab_is_eog(vocab, new_token_id)) {
+      break;
+    }
+    auto res = token_to_piece(vocab, new_token_id);
+    if (!res) {
+      llama_batch_ext_free(batch);
+      llama_sampler_free(smpl);
+      llama_free(ctx);
+      llama_model_free(model);
+      llama_backend_free();
+      return 1;
+    }
+    // flush 的时间成本和模型 token 耗时相比可以忽略
+    std::cout << *res << std::flush;
+    
+    if (!batch_set_tokens(batch, {&new_token_id, 1}, n_pos)) {
+      llama_batch_ext_free(batch);
+      llama_sampler_free(smpl);
+      llama_free(ctx);
+      llama_model_free(model);
+      llama_backend_free();
+      return 1;
+    }
+    n_tokens = 1;
   }
-  const llama_token new_token_id = llama_sampler_sample(smpl, ctx, -1);
-  if (llama_vocab_is_eog(vocab, new_token_id)) {
-    std::cerr << __func__ << "输出 token 为 eog\n";
-    llama_batch_ext_free(batch);
-    llama_sampler_free(smpl);
-    llama_free(ctx);
-    llama_model_free(model);
-    llama_backend_free();
-    return 0;
-  }
-  auto res = token_to_piece(vocab, new_token_id);
-  if (!res) {
-    llama_batch_ext_free(batch);
-    llama_sampler_free(smpl);
-    llama_free(ctx);
-    llama_model_free(model);
-    llama_backend_free();
-    return 1;
-  }
-  std::cout << *res << "\n";
+
+  std::cout << "\n";
 
   llama_batch_ext_free(batch);
   llama_sampler_free(smpl);
   llama_free(ctx);
   llama_model_free(model);
   llama_backend_free();
+  return 0;
 }
