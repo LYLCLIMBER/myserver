@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <limits>
 #include <optional>
 #include <string>
@@ -7,6 +8,7 @@
 #include <string_view>
 #include <cstdint>
 #include <span>
+#include <charconv>
 
 // 防止 ASAN 检查 cuda 报错
 #if defined(__SANITIZE_ADDRESS__)
@@ -20,6 +22,13 @@ extern "C" const char* __asan_default_options()
 
 namespace
 {
+struct Config {
+  std::string model_path {};
+  std::string prompt {"你好"};
+  int ngl {99};
+  int n_predict {32};
+};
+
 void print_model_desc(const llama_model* model)
 {
   char buffer[256] {};
@@ -35,7 +44,7 @@ void print_model_desc(const llama_model* model)
     return;
   }
   // std::cout 会从开头读到 \0，没有 \0 会造成未定义行为
-  std::cout << buffer << "\n";
+  std::cout << "模型描述符：" << buffer << "\n";
 }
 
 void log_callback(enum ggml_log_level level, const char* text, void* /* user_data */)
@@ -120,10 +129,6 @@ std::optional<std::string> detokenize(const llama_vocab* vocab, const std::vecto
 // 清空 batch，从 pos_0 开始连续填充 token 到 batch 中，连续设置位置编码；只设置输出最后一个 token 的 logits
 bool batch_set_tokens(llama_batch_ext* batch, std::span<const llama_token> tokens, llama_pos pos_0)
 {
-  if (batch == nullptr) {
-    std::cerr << __func__ << ": error: batch 无效\n";
-    return false;
-  }
   llama_batch_ext_clear(batch);
   if (tokens.empty()) {
     std::cerr << __func__ << ": error: 填充 tokens 为空\n";
@@ -136,10 +141,7 @@ bool batch_set_tokens(llama_batch_ext* batch, std::span<const llama_token> token
       std::cerr << __func__ << ": error: 填充 tokens 失败，返回" << idx << "\n";
       return false;
     }
-    if (i > INT32_MAX) {
-      std::cerr << __func__ << ": error: token 填充溢出\n";
-      return false;
-    }
+    // tokenize 保证了 tokens 长度不会超过 INT32_MAX
     const llama_pos pos {pos_0 + static_cast<llama_pos>(i)};
     if (!llama_batch_ext_set_pos(batch, idx, &pos)) {
       std::cerr << __func__ << ": error: pos 设置失败\n";
@@ -152,19 +154,111 @@ bool batch_set_tokens(llama_batch_ext* batch, std::span<const llama_token> token
   }
   return true;
 }
+
+void print_usage(char** argv)
+{
+  std::cerr << "\nexample usage:\n";
+  std::cerr << argv[0] << "    -m model.gguf [-n n_predict] [-ngl n_gpu_layers] [-p prompt]\n\n";
+}
+
+std::optional<int32_t> string_to_int(std::string_view s)
+{
+  int32_t res {};
+  auto [ptr, ec] {std::from_chars(s.data(), s.data() + s.size(), res)};
+  if (ec == std::errc {}) {
+    if (ptr == s.data() + s.size()) {
+      return res;
+    } else {
+      std::cerr << __func__ << ": error: 这不是一个数字\n";
+      return std::nullopt;
+    }
+  } else if (ec == std::errc::invalid_argument) {
+    std::cerr << __func__ << ": error: 这不是一个数字\n";
+    return std::nullopt;
+  } else if (ec == std::errc::result_out_of_range) {
+    std::cerr << __func__ << ": error: 数值溢出\n";
+    return std::nullopt;
+  } else {
+    std::cerr << __func__ << ": error: 转换错误\n";
+    return std::nullopt;
+  }
+}
+
+std::optional<Config> parse_args(int argc, char* argv[])
+{
+  Config config {};
+  int32_t i = 1;
+
+  for (; i < argc; ++i) {
+    // argv[i] 以空字符结尾，不用担心 sting_view 越界
+    const std::string_view arg {argv[i]};
+    // string_view 能够直接和字符串字面量比较
+    if (arg == "-m") {
+      if (i + 1 < argc) {
+        config.model_path = argv[++i];
+      } else {
+        print_usage(argv);
+        return std::nullopt;
+      }
+    } else if (arg == "-n") {
+      if (i + 1 < argc) {
+        auto n_opt {string_to_int(argv[++i])};
+        if (!n_opt) {
+          return std::nullopt;
+        }
+        if (*n_opt <= 0) {
+          std::cerr << __func__ << ": error: n 只接受正整数\n";
+          return std::nullopt;
+        }
+        config.n_predict = *n_opt;
+      } else {
+        print_usage(argv);
+        return std::nullopt;
+      }
+    } else if (arg == "-ngl") {
+      if (i + 1 < argc) {
+        auto ngl_opt {string_to_int(argv[++i])};
+        if (!ngl_opt) {
+          return std::nullopt;
+        }
+        if (*ngl_opt < 0) {
+          std::cerr << __func__ << ": error: ngl 不接受负数\n";
+          return std::nullopt;
+        }
+        config.ngl = *ngl_opt;
+      } else {
+        print_usage(argv);
+        return std::nullopt;
+      }
+    } else if (arg == "-p") {
+      if (i + 1 < argc) {
+        config.prompt = argv[++i];
+      } else {
+        print_usage(argv);
+        return std::nullopt;
+      }
+    } else {
+      print_usage(argv);
+      return std::nullopt;
+    }
+  }
+  if (config.model_path.empty()) {
+    std::cerr << __func__ << ": error: 模型路径为空\n";
+    return std::nullopt;
+  }
+  return config;
+}
 } // namespace
 
-int main()
+int main(int argc, char* argv[])
 {
-  // 初始化配置，目前暂时写死
-  const std::string model_path {"/home/liuyulong/Codes/project/models/qwen2.5-3b-instruct-q4_k_m.gguf"};
-  const std::string prompt {"你好"};
-  const int ngl {99};
-  const int n_predict {32};
-
-  if (model_path.empty()) {
+  // 解析命令行参数
+  auto parse_res {parse_args(argc, argv)};
+  if (!parse_res) {
+    std::cerr << __func__ << ": error: 命令行参数解析失败\n";
     return 1;
   }
+  const Config config {*parse_res};
 
   // 只打印错误日志
   // TODO: logger 是全局状态，"NOT thread safe"
@@ -174,9 +268,9 @@ int main()
 
   // 初始化模型配置和实例
   auto model_params {llama_model_default_params()};
-  model_params.n_gpu_layers = ngl;
+  model_params.n_gpu_layers = config.ngl;
 
-  auto* model {llama_model_load_from_file(model_path.c_str(), model_params)};
+  auto* model {llama_model_load_from_file(config.model_path.c_str(), model_params)};
   if (model == nullptr) {
     std::cerr << __func__ << ": error: unable to load model\n";
     llama_backend_free();
@@ -193,7 +287,7 @@ int main()
 
   // 分词
   const auto* vocab {llama_model_get_vocab(model)};
-  const auto tokenize_result {tokenize(vocab, prompt)};
+  const auto tokenize_result {tokenize(vocab, config.prompt)};
   if (!tokenize_result) {
     llama_model_free(model);
     llama_backend_free();
@@ -224,7 +318,14 @@ int main()
   ctx_params.n_batch = static_cast<uint32_t>(n_prompt);
   ctx_params.no_perf = false;
   // 最后一个 token 不送回上下文
-  ctx_params.n_ctx = static_cast<uint32_t>(n_prompt + n_predict - 1);
+  const int n_ctx_train {llama_model_n_ctx_train(model)};
+  if (n_prompt > n_ctx_train - config.n_predict + 1) {
+    std::cerr << __func__ << ": error: 上下文长度超出模型训练时的上下文长度 " << n_ctx_train << "\n";
+    llama_model_free(model);
+    llama_backend_free();
+    return 1;
+  }
+  ctx_params.n_ctx = static_cast<uint32_t>(n_prompt + config.n_predict - 1);
   auto* ctx {llama_init_from_model(model, ctx_params)};
   if (ctx == nullptr) {
     llama_model_free(model);
@@ -241,6 +342,14 @@ int main()
 
   // 准备第一个 batch 输入
   llama_batch_ext* batch {llama_batch_ext_init(ctx)};
+  if (batch == nullptr) {
+    std::cerr << __func__ << ": error: batch 无效\n";
+    llama_sampler_free(smpl);
+    llama_free(ctx);
+    llama_model_free(model);
+    llama_backend_free();
+    return 1;
+  }
   if (!batch_set_tokens(batch, prompt_tokens, 0)) {
     llama_batch_ext_free(batch);
     llama_sampler_free(smpl);
@@ -253,7 +362,7 @@ int main()
   // 循环输出 token
 
   int32_t n_tokens {n_prompt}; // 本次循环要处理的 token 数量，第一轮处理 prompt
-  for (int32_t n_pos = 0; n_pos + n_tokens < n_prompt + n_predict; ) {
+  for (int32_t n_pos = 0; n_pos + n_tokens < n_prompt + config.n_predict;) {
     const int32_t ret {llama_process(ctx, LLAMA_PROCESS_TYPE_DECODE, batch)};
     if (ret != 0) {
       std::cerr << __func__ << ": error: 推理失败，ret =" << ret << "\n";
@@ -281,7 +390,7 @@ int main()
     }
     // flush 的时间成本和模型 token 耗时相比可以忽略
     std::cout << *res << std::flush;
-    
+
     if (!batch_set_tokens(batch, {&new_token_id, 1}, n_pos)) {
       llama_batch_ext_free(batch);
       llama_sampler_free(smpl);
